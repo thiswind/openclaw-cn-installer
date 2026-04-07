@@ -7,6 +7,7 @@
 - 默认使用国内 npm 镜像：`https://registry.npmmirror.com`
 - GitHub 下载与克隆支持“镜像优先、源站回退”
 - 全局安装 OpenClaw 时采用 `pnpm` 优先，失败自动回退到 `npm`
+- 安装完成后自动尝试应用 Windows ESM 热补丁（幂等）
 - 尽量保持与官方安装脚本一致的流程，减少额外行为
 
 ## 文件说明
@@ -114,7 +115,7 @@ powershell -ExecutionPolicy Bypass -File .\install-openclaw-cn.ps1
 ### 4) 这个仓库的脚本能完全解决这个 Windows 问题吗？
 
 不能保证 100% 解决。  
-本仓库脚本主要优化的是安装与下载链路（国内镜像、`pnpm` 优先、回退策略），并不直接修改 OpenClaw 上游运行时代码。  
+本仓库脚本除了优化安装与下载链路（国内镜像、`pnpm` 优先、回退策略），也会在安装后自动对本地 `jiti.mjs` 执行热补丁；但由于上游变更、安装形态差异或未来文件结构变化，仍无法保证所有环境都一次修复。  
 如果你遇到该报错，建议关注上面的 issue/PR 进展，或优先使用 WSL2 路径。
 
 ---
