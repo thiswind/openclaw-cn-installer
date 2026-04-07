@@ -12,6 +12,33 @@ function Get-GlobalOpenClawRoot {
     if (-not $npm) {
         throw "npm not found on PATH."
     }
+
+    try {
+        $openclawCmd = Get-Command openclaw -ErrorAction SilentlyContinue
+        if ($openclawCmd -and $openclawCmd.Source) {
+            $cmdDir = Split-Path -Parent $openclawCmd.Source
+            $npmShimRoot = Join-Path $cmdDir "node_modules\openclaw"
+            if (Test-Path $npmShimRoot) {
+                return $npmShimRoot
+            }
+        }
+    } catch {
+        # fallback below
+    }
+
+    try {
+        $pnpmBase = Join-Path $env:LOCALAPPDATA "pnpm\global"
+        if (Test-Path $pnpmBase) {
+            $pnpmCandidates = Get-ChildItem -Path (Join-Path $pnpmBase "*\.pnpm\openclaw@*\node_modules\openclaw") -Directory -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending
+            if ($pnpmCandidates -and $pnpmCandidates.Count -gt 0) {
+                return $pnpmCandidates[0].FullName
+            }
+        }
+    } catch {
+        # fallback below
+    }
+
     $npmRoot = (& $npm.Source root -g 2>$null).Trim()
     if (-not [string]::IsNullOrWhiteSpace($npmRoot)) {
         $candidate = Join-Path $npmRoot "openclaw"
@@ -50,7 +77,7 @@ function Apply-TextReplacements {
         }
     }
     if ($changed -and -not $DryRun) {
-        Set-Content -Path $Path -Value $updated -NoNewline
+        Set-Content -Path $Path -Value $updated -NoNewline -Encoding utf8
     }
     return $changed
 }
@@ -62,7 +89,19 @@ if (-not $openclawRoot) {
 
 $patchedAny = $false
 
-$jitiPath = Join-Path $openclawRoot "node_modules\jiti\lib\jiti.mjs"
+$jitiLibDir = Join-Path $openclawRoot "node_modules\jiti\lib"
+if (-not (Test-Path $jitiLibDir)) {
+    try {
+        $resolvedJiti = node -e "const p=process.argv[1]; console.log(require.resolve('jiti',{paths:[p]}));" "$openclawRoot"
+        if (-not [string]::IsNullOrWhiteSpace($resolvedJiti)) {
+            $jitiLibDir = Split-Path -Parent $resolvedJiti.Trim()
+        }
+    } catch {
+        # fallback below
+    }
+}
+
+$jitiPath = Join-Path $jitiLibDir "jiti.mjs"
 if (Test-Path $jitiPath) {
     $content = Get-Content -Raw -Path $jitiPath
     if (-not ($content -match "pathToFileURL" -and $content -match "isAbsolute")) {
@@ -82,15 +121,15 @@ const nativeImport = (id) =>
 '@
         if (-not $DryRun) {
             $patched = $content.Replace($needle, $replacement)
-            Set-Content -Path $jitiPath -Value $patched -NoNewline
+            Set-Content -Path $jitiPath -Value $patched -NoNewline -Encoding utf8
         }
         $patchedAny = $true
     }
 } else {
-    throw "jiti.mjs not found: $jitiPath"
+    Write-Host "[!] jiti.mjs not found at detected jiti path: $jitiPath" -ForegroundColor Yellow
 }
 
-$jitiCjsPath = Join-Path $openclawRoot "node_modules\jiti\lib\jiti.cjs"
+$jitiCjsPath = Join-Path $jitiLibDir "jiti.cjs"
 if (Test-Path $jitiCjsPath) {
     $patchedAny = (Apply-TextReplacements -Path $jitiCjsPath -Replacements @(
         @('const { createRequire } = require("node:module");', 'const { createRequire } = require("node:module");' + "`n" + 'const { pathToFileURL } = require("node:url");' + "`n" + 'const { isAbsolute } = require("node:path");'),
@@ -111,7 +150,7 @@ export async function resolve(specifier, context, nextResolve) {
 '@
 if (-not (Test-Path $shimPath)) {
     if (-not $DryRun) {
-        Set-Content -Path $shimPath -Value $shimContent -NoNewline
+        Set-Content -Path $shimPath -Value $shimContent -NoNewline -Encoding utf8
     }
     $patchedAny = $true
 }
@@ -140,7 +179,7 @@ if (process.platform === "win32" && typeof module.register === "function") {
     }
     if (-not $DryRun) {
         $bootstrapPatched = $bootstrapContent.Replace($importNeedle, $importInsert)
-        Set-Content -Path $bootstrapPath -Value $bootstrapPatched -NoNewline
+        Set-Content -Path $bootstrapPath -Value $bootstrapPatched -NoNewline -Encoding utf8
     }
     $patchedAny = $true
 }
@@ -204,6 +243,38 @@ $patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "pi-embedded-DWA
     @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
     @('getJiti(safeSource)(safeSource)', 'getJiti(safeSource)(process.platform === "win32" && path.win32.isAbsolute(safeSource) ? pathToFileURL(safeSource).href : safeSource)')
 )) -or $patchedAny
+
+$fallbackHelperFiles = @(
+    "loader-BkajlJCF.js",
+    "channel-entry-contract-DyY5TZkc.js",
+    "facade-runtime-Bv3MxT2V.js",
+    "zod-schema-C3jh3SvI.js",
+    "bootstrap-registry-DSG7nIY1.js",
+    "config-presence-Bwyumb-a.js",
+    "setup-registry-CLKO_jQP.js",
+    "io-CS2J_l4V.js"
+)
+
+foreach ($fileName in $fallbackHelperFiles) {
+    $filePath = Join-Path $distDir $fileName
+    if (-not (Test-Path $filePath)) { continue }
+    $content = Get-Content -Raw -Path $filePath
+    if ($content.Contains("toSafeImportPath(") -and -not ($content -match 'function\s+toSafeImportPath\s*\(')) {
+        $helper = @'
+function toSafeImportPath(specifier) {
+  if (process.platform !== "win32") return specifier;
+  if (typeof specifier !== "string") return specifier;
+  if (specifier.startsWith("file://")) return specifier;
+  if (/^[a-zA-Z]:[\\/]/.test(specifier)) return "file:///" + specifier.replace(/\\/g, "/");
+  return specifier;
+}
+'@
+        if (-not $DryRun) {
+            Set-Content -Path $filePath -Value ($content + $helper) -NoNewline -Encoding utf8
+        }
+        $patchedAny = $true
+    }
+}
 
 if ($DryRun) {
     if ($patchedAny) {
