@@ -524,6 +524,18 @@ function Get-OpenClawPackageRoot {
 }
 
 function Apply-OpenClawWindowsEsmPatch {
+    $installerDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+    $externalPatchScript = if (-not [string]::IsNullOrWhiteSpace($installerDir)) { Join-Path $installerDir "patch-openclaw-windows-esm.ps1" } else { $null }
+    if ($externalPatchScript -and (Test-Path $externalPatchScript)) {
+        try {
+            & powershell -ExecutionPolicy Bypass -File $externalPatchScript | Out-Null
+            Write-Host "[OK] Applied Windows ESM patch via patch-openclaw-windows-esm.ps1" -ForegroundColor Green
+            return
+        } catch {
+            Write-Host "[!] External patch script failed; falling back to built-in patch." -ForegroundColor Yellow
+        }
+    }
+
     $openclawRoot = Get-OpenClawPackageRoot
     if (-not $openclawRoot) {
         Write-Host "[!] OpenClaw package root not found; skipping Windows ESM patch." -ForegroundColor Yellow

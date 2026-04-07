@@ -28,6 +28,33 @@ function Get-GlobalOpenClawRoot {
     return $null
 }
 
+function Apply-TextReplacements {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [Parameter(Mandatory = $true)]
+        [array]$Replacements
+    )
+    if (-not (Test-Path $Path)) {
+        return $false
+    }
+    $content = Get-Content -Raw -Path $Path
+    $updated = $content
+    $changed = $false
+    foreach ($pair in $Replacements) {
+        $old = $pair[0]
+        $new = $pair[1]
+        if ($updated.Contains($old)) {
+            $updated = $updated.Replace($old, $new)
+            $changed = $true
+        }
+    }
+    if ($changed -and -not $DryRun) {
+        Set-Content -Path $Path -Value $updated -NoNewline
+    }
+    return $changed
+}
+
 $openclawRoot = Get-GlobalOpenClawRoot
 if (-not $openclawRoot) {
     throw "openclaw package root not found in global npm paths."
@@ -109,6 +136,49 @@ if (process.platform === "win32" && typeof module.register === "function") {
     }
     $patchedAny = $true
 }
+
+$distDir = Join-Path $openclawRoot "dist"
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "loader-BkajlJCF.js") -Replacements @(
+    @('import path from "node:path";', 'import path from "node:path";' + "`n" + 'import { pathToFileURL } from "node:url";'),
+    @('const defaultLogger = () => createSubsystemLogger("plugins");', 'const defaultLogger = () => createSubsystemLogger("plugins");' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('getJiti(runtimeModulePath)(runtimeModulePath)', 'getJiti(runtimeModulePath)(toSafeImportPath(runtimeModulePath))'),
+    @('getJiti(safeSource)(safeSource)', 'getJiti(safeSource)(toSafeImportPath(safeSource))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "channel-entry-contract-DyY5TZkc.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('return opened.path;' + "`n" + '}', 'return opened.path;' + "`n" + '}' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
+    @('getJiti(modulePath)(modulePath)', 'getJiti(modulePath)(toSafeImportPath(modulePath))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "facade-runtime-Bv3MxT2V.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('const loadedFacadePluginIds = /* @__PURE__ */ new Set();', 'const loadedFacadePluginIds = /* @__PURE__ */ new Set();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
+    @('getJiti(location.modulePath)(location.modulePath)', 'getJiti(location.modulePath)(toSafeImportPath(location.modulePath))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "zod-schema-C3jh3SvI.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('const jitiLoaders = /* @__PURE__ */ new Map();', 'const jitiLoaders = /* @__PURE__ */ new Map();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
+    @('getJiti(modulePath)(modulePath)', 'getJiti(modulePath)(toSafeImportPath(modulePath))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "bootstrap-registry-DSG7nIY1.js") -Replacements @(
+    @('import path from "node:path";', 'import path from "node:path";' + "`n" + 'import { pathToFileURL } from "node:url";'),
+    @('const nodeRequire = createRequire(import.meta.url);', 'const nodeRequire = createRequire(import.meta.url);' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
+    @('loadModule(safePath)(safePath)', 'loadModule(safePath)(toSafeImportPath(safePath))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "config-presence-Bwyumb-a.js") -Replacements @(
+    @('import path from "node:path";', 'import path from "node:path";' + "`n" + 'import { pathToFileURL } from "node:url";'),
+    @('const registryCache = /* @__PURE__ */ new Map();', 'const registryCache = /* @__PURE__ */ new Map();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
+    @('loadModule(safePath)(safePath)', 'loadModule(safePath)(toSafeImportPath(safePath))')
+)) -or $patchedAny
 
 if ($DryRun) {
     if ($patchedAny) {
