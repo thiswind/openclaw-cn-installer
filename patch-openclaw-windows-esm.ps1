@@ -90,6 +90,14 @@ const nativeImport = (id) =>
     throw "jiti.mjs not found: $jitiPath"
 }
 
+$jitiCjsPath = Join-Path $openclawRoot "node_modules\jiti\lib\jiti.cjs"
+if (Test-Path $jitiCjsPath) {
+    $patchedAny = (Apply-TextReplacements -Path $jitiCjsPath -Replacements @(
+        @('const { createRequire } = require("node:module");', 'const { createRequire } = require("node:module");' + "`n" + 'const { pathToFileURL } = require("node:url");' + "`n" + 'const { isAbsolute } = require("node:path");'),
+        @('const nativeImport = (id) => import(id);', 'const nativeImport = (id) =>' + "`n" + '  import(' + "`n" + '    process.platform === "win32" && typeof id === "string" && isAbsolute(id)' + "`n" + '      ? pathToFileURL(id).href' + "`n" + '      : id,' + "`n" + '  );')
+    )) -or $patchedAny
+}
+
 $shimPath = Join-Path $openclawRoot "windows-esm-fix.mjs"
 $shimContent = @'
 import { pathToFileURL } from "node:url";
@@ -178,6 +186,23 @@ $patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "config-presence
     @('const registryCache = /* @__PURE__ */ new Map();', 'const registryCache = /* @__PURE__ */ new Map();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
     @('shouldPreferNativeJiti(modulePath) || modulePath.includes(`${path.sep}dist${path.sep}`)', 'shouldPreferNativeJiti(modulePath) || process.platform !== "win32" && modulePath.includes(`${path.sep}dist${path.sep}`)'),
     @('loadModule(safePath)(safePath)', 'loadModule(safePath)(toSafeImportPath(safePath))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "setup-registry-CLKO_jQP.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('const setupProviderCache = /* @__PURE__ */ new Map();', 'const setupProviderCache = /* @__PURE__ */ new Map();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('getJiti(setupSource)(setupSource)', 'getJiti(setupSource)(toSafeImportPath(setupSource))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "io-CS2J_l4V.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('const doctorContractCache = /* @__PURE__ */ new Map();', 'const doctorContractCache = /* @__PURE__ */ new Map();' + "`n" + 'function toSafeImportPath(specifier) {' + "`n" + "`t" + 'if (process.platform !== "win32") return specifier;' + "`n" + "`t" + 'if (specifier.startsWith("file://")) return specifier;' + "`n" + "`t" + 'if (path.win32.isAbsolute(specifier)) return pathToFileURL(specifier).href;' + "`n" + "`t" + 'return specifier;' + "`n" + '}'),
+    @('getJiti(contractSource)(contractSource)', 'getJiti(contractSource)(toSafeImportPath(contractSource))')
+)) -or $patchedAny
+
+$patchedAny = (Apply-TextReplacements -Path (Join-Path $distDir "pi-embedded-DWASRjxE.js") -Replacements @(
+    @('import { fileURLToPath } from "node:url";', 'import { fileURLToPath, pathToFileURL } from "node:url";'),
+    @('getJiti(safeSource)(safeSource)', 'getJiti(safeSource)(process.platform === "win32" && path.win32.isAbsolute(safeSource) ? pathToFileURL(safeSource).href : safeSource)')
 )) -or $patchedAny
 
 if ($DryRun) {
