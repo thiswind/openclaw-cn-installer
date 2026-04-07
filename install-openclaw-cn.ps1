@@ -530,25 +530,15 @@ function Apply-OpenClawWindowsEsmPatch {
         return
     }
 
+    $patchedAny = $false
+
     $jitiPath = Join-Path $openclawRoot "node_modules\jiti\lib\jiti.mjs"
-    if (-not (Test-Path $jitiPath)) {
-        Write-Host "[!] jiti.mjs not found; skipping Windows ESM patch." -ForegroundColor Yellow
-        return
-    }
-
-    $content = Get-Content -Raw -Path $jitiPath
-    if ($content -match "pathToFileURL" -and $content -match "isAbsolute") {
-        Write-Host "[OK] Windows ESM patch already present" -ForegroundColor Green
-        return
-    }
-
-    $needle = "const nativeImport = (id) => import(id);"
-    if ($content -notmatch [regex]::Escape($needle)) {
-        Write-Host "[!] Expected jiti import line not found; skipping patch." -ForegroundColor Yellow
-        return
-    }
-
-    $replacement = @'
+    if (Test-Path $jitiPath) {
+        $jitiContent = Get-Content -Raw -Path $jitiPath
+        if (-not ($jitiContent -match "pathToFileURL" -and $jitiContent -match "isAbsolute")) {
+            $needle = "const nativeImport = (id) => import(id);"
+            if ($jitiContent -match [regex]::Escape($needle)) {
+                $replacement = @'
 import { pathToFileURL } from "node:url";
 import { isAbsolute } from "node:path";
 const nativeImport = (id) =>
@@ -558,9 +548,68 @@ const nativeImport = (id) =>
 			: id,
 	);
 '@
-    $patched = $content.Replace($needle, $replacement)
-    Set-Content -Path $jitiPath -Value $patched -NoNewline
-    Write-Host "[OK] Applied Windows ESM patch to jiti.mjs" -ForegroundColor Green
+                $jitiPatched = $jitiContent.Replace($needle, $replacement)
+                Set-Content -Path $jitiPath -Value $jitiPatched -NoNewline
+                $patchedAny = $true
+                Write-Host "[OK] Applied Windows ESM patch to jiti.mjs" -ForegroundColor Green
+            } else {
+                Write-Host "[!] Expected jiti import line not found; skipped jiti patch." -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Host "[!] jiti.mjs not found; skipped jiti patch." -ForegroundColor Yellow
+    }
+
+    $shimPath = Join-Path $openclawRoot "windows-esm-fix.mjs"
+    $shimContent = @'
+import { pathToFileURL } from "node:url";
+
+export async function resolve(specifier, context, nextResolve) {
+  if (/^[a-zA-Z]:/.test(specifier)) {
+    return nextResolve(pathToFileURL(specifier).href, context);
+  }
+  return nextResolve(specifier, context);
+}
+'@
+    if (-not (Test-Path $shimPath)) {
+        Set-Content -Path $shimPath -Value $shimContent -NoNewline
+        $patchedAny = $true
+        Write-Host "[OK] Added windows-esm-fix.mjs loader shim" -ForegroundColor Green
+    }
+
+    $bootstrapPath = Join-Path $openclawRoot "openclaw.mjs"
+    if (Test-Path $bootstrapPath) {
+        $bootstrapContent = Get-Content -Raw -Path $bootstrapPath
+        if ($bootstrapContent -notmatch "windows-esm-fix\.mjs") {
+            $importNeedle = 'import { fileURLToPath } from "node:url";'
+            $importInsert = @'
+import { fileURLToPath } from "node:url";
+
+// Windows-only loader shim for drive-letter ESM imports.
+if (process.platform === "win32" && typeof module.register === "function") {
+  try {
+    module.register("./windows-esm-fix.mjs", import.meta.url);
+  } catch {
+    // Non-fatal: continue without the shim if registration fails.
+  }
+}
+'@
+            if ($bootstrapContent -match [regex]::Escape($importNeedle)) {
+                $bootstrapPatched = $bootstrapContent.Replace($importNeedle, $importInsert)
+                Set-Content -Path $bootstrapPath -Value $bootstrapPatched -NoNewline
+                $patchedAny = $true
+                Write-Host "[OK] Patched openclaw.mjs to register loader shim" -ForegroundColor Green
+            } else {
+                Write-Host "[!] openclaw.mjs import anchor not found; skipped bootstrap patch." -ForegroundColor Yellow
+            }
+        }
+    } else {
+        Write-Host "[!] openclaw.mjs not found; skipped bootstrap patch." -ForegroundColor Yellow
+    }
+
+    if (-not $patchedAny) {
+        Write-Host "[OK] Windows ESM patch already present" -ForegroundColor Green
+    }
 }
 
 # Install OpenClaw
