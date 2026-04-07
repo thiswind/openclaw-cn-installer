@@ -502,6 +502,67 @@ function Ensure-Pnpm {
     Write-Host "[OK] pnpm installed" -ForegroundColor Green
 }
 
+function Get-OpenClawPackageRoot {
+    try {
+        $npmRoot = (& (Get-NpmCommandPath) root -g 2>$null).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($npmRoot)) {
+            $candidate = Join-Path $npmRoot "openclaw"
+            if (Test-Path $candidate) {
+                return $candidate
+            }
+        }
+    } catch {
+        # fallback below
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:APPDATA)) {
+        $fallback = Join-Path $env:APPDATA "npm\node_modules\openclaw"
+        if (Test-Path $fallback) {
+            return $fallback
+        }
+    }
+    return $null
+}
+
+function Apply-OpenClawWindowsEsmPatch {
+    $openclawRoot = Get-OpenClawPackageRoot
+    if (-not $openclawRoot) {
+        Write-Host "[!] OpenClaw package root not found; skipping Windows ESM patch." -ForegroundColor Yellow
+        return
+    }
+
+    $jitiPath = Join-Path $openclawRoot "node_modules\jiti\lib\jiti.mjs"
+    if (-not (Test-Path $jitiPath)) {
+        Write-Host "[!] jiti.mjs not found; skipping Windows ESM patch." -ForegroundColor Yellow
+        return
+    }
+
+    $content = Get-Content -Raw -Path $jitiPath
+    if ($content -match "pathToFileURL" -and $content -match "isAbsolute") {
+        Write-Host "[OK] Windows ESM patch already present" -ForegroundColor Green
+        return
+    }
+
+    $needle = "const nativeImport = (id) => import(id);"
+    if ($content -notmatch [regex]::Escape($needle)) {
+        Write-Host "[!] Expected jiti import line not found; skipping patch." -ForegroundColor Yellow
+        return
+    }
+
+    $replacement = @'
+import { pathToFileURL } from "node:url";
+import { isAbsolute } from "node:path";
+const nativeImport = (id) =>
+	import(
+		process.platform === "win32" && typeof id === "string" && isAbsolute(id)
+			? pathToFileURL(id).href
+			: id,
+	);
+'@
+    $patched = $content.Replace($needle, $replacement)
+    Set-Content -Path $jitiPath -Value $patched -NoNewline
+    Write-Host "[OK] Applied Windows ESM patch to jiti.mjs" -ForegroundColor Green
+}
+
 # Install OpenClaw
 function Install-OpenClaw {
     if ([string]::IsNullOrWhiteSpace($Tag)) {
@@ -778,6 +839,7 @@ function Main {
     }
 
     Refresh-GatewayServiceIfLoaded
+    Apply-OpenClawWindowsEsmPatch
 
     # Step 3: Run doctor for migrations if upgrading or git install
     if ($isUpgrade -or $InstallMethod -eq "git") {
