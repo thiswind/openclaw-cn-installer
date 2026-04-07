@@ -65,7 +65,7 @@ function Apply-TextReplacements {
     if (-not (Test-Path $Path)) {
         return $false
     }
-    $content = Get-Content -Raw -Path $Path
+    $content = Get-Content -Raw -Encoding utf8 -Path $Path
     $updated = $content
     $changed = $false
     foreach ($pair in $Replacements) {
@@ -103,7 +103,7 @@ if (-not (Test-Path $jitiLibDir)) {
 
 $jitiPath = Join-Path $jitiLibDir "jiti.mjs"
 if (Test-Path $jitiPath) {
-    $content = Get-Content -Raw -Path $jitiPath
+    $content = Get-Content -Raw -Encoding utf8 -Path $jitiPath
     if (-not ($content -match "pathToFileURL" -and $content -match "isAbsolute")) {
         $needle = "const nativeImport = (id) => import(id);"
         if ($content -notmatch [regex]::Escape($needle)) {
@@ -131,10 +131,53 @@ const nativeImport = (id) =>
 
 $jitiCjsPath = Join-Path $jitiLibDir "jiti.cjs"
 if (Test-Path $jitiCjsPath) {
-    $patchedAny = (Apply-TextReplacements -Path $jitiCjsPath -Replacements @(
-        @('const { createRequire } = require("node:module");', 'const { createRequire } = require("node:module");' + "`n" + 'const { pathToFileURL } = require("node:url");' + "`n" + 'const { isAbsolute } = require("node:path");'),
-        @('const nativeImport = (id) => import(id);', 'const nativeImport = (id) =>' + "`n" + '  import(' + "`n" + '    process.platform === "win32" && typeof id === "string" && isAbsolute(id)' + "`n" + '      ? pathToFileURL(id).href' + "`n" + '      : id,' + "`n" + '  );')
-    )) -or $patchedAny
+    # Use single-quoted here-strings so PowerShell does not treat `import(` as syntax.
+    # Idempotent: do not replace `createRequire` line blindly (re-running would duplicate requires).
+    $jitiCjsHeader = @'
+const { createRequire } = require("node:module");
+const { pathToFileURL } = require("node:url");
+const { isAbsolute } = require("node:path");
+'@
+    $jitiCjsNativeImport = @'
+const nativeImport = (id) =>
+  import(
+    process.platform === "win32" && typeof id === "string" && isAbsolute(id)
+      ? pathToFileURL(id).href
+      : id,
+  );
+'@
+    $jitiCjsContent = Get-Content -Raw -Encoding utf8 -Path $jitiCjsPath
+    $jitiCjsUpdated = $jitiCjsContent
+    $jitiCjsChanged = $false
+    if ($jitiCjsUpdated -notmatch 'const \{ pathToFileURL \} = require\("node:url"\)') {
+        $jitiCjsUpdated = $jitiCjsUpdated.Replace(
+            'const { createRequire } = require("node:module");',
+            $jitiCjsHeader.TrimEnd() + "`n"
+        )
+        $jitiCjsChanged = $true
+    }
+    if ($jitiCjsUpdated -match 'const nativeImport = \(id\) => import\(id\);') {
+        $jitiCjsUpdated = $jitiCjsUpdated.Replace(
+            'const nativeImport = (id) => import(id);',
+            $jitiCjsNativeImport.TrimEnd() + "`n"
+        )
+        $jitiCjsChanged = $true
+    }
+    $jitiCjsDeduped = [regex]::Replace(
+        $jitiCjsUpdated,
+        '(const \{ pathToFileURL \} = require\("node:url"\);\r?\nconst \{ isAbsolute \} = require\("node:path"\);\r?\n){2,}',
+        "const { pathToFileURL } = require(`"node:url`");`nconst { isAbsolute } = require(`"node:path`");`n"
+    )
+    if ($jitiCjsDeduped -ne $jitiCjsUpdated) {
+        $jitiCjsUpdated = $jitiCjsDeduped
+        $jitiCjsChanged = $true
+    }
+    if ($jitiCjsChanged -and -not $DryRun) {
+        Set-Content -Path $jitiCjsPath -Value $jitiCjsUpdated -NoNewline -Encoding utf8
+    }
+    if ($jitiCjsChanged) {
+        $patchedAny = $true
+    }
 }
 
 $shimPath = Join-Path $openclawRoot "windows-esm-fix.mjs"
@@ -159,7 +202,7 @@ $bootstrapPath = Join-Path $openclawRoot "openclaw.mjs"
 if (-not (Test-Path $bootstrapPath)) {
     throw "openclaw.mjs not found: $bootstrapPath"
 }
-$bootstrapContent = Get-Content -Raw -Path $bootstrapPath
+$bootstrapContent = Get-Content -Raw -Encoding utf8 -Path $bootstrapPath
 if ($bootstrapContent -notmatch "windows-esm-fix\.mjs") {
     $importNeedle = 'import { fileURLToPath } from "node:url";'
     $importInsert = @'
@@ -258,7 +301,7 @@ $fallbackHelperFiles = @(
 foreach ($fileName in $fallbackHelperFiles) {
     $filePath = Join-Path $distDir $fileName
     if (-not (Test-Path $filePath)) { continue }
-    $content = Get-Content -Raw -Path $filePath
+    $content = Get-Content -Raw -Encoding utf8 -Path $filePath
     if ($content.Contains("toSafeImportPath(") -and -not ($content -match 'function\s+toSafeImportPath\s*\(')) {
         $helper = @'
 function toSafeImportPath(specifier) {

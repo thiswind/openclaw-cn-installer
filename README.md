@@ -14,6 +14,7 @@
 
 - `install-openclaw-cn.ps1`：主安装脚本
 - `patch-openclaw-windows-esm.ps1`：Windows ESM 热补丁脚本（可单独执行）
+- `repair-openclaw-windows.ps1`：一键修复（可选 `npm` 全局重装 + 打 ESM 补丁；默认结束后尝试 `openclaw gateway restart`）
 
 ## Windows ESM 热补丁说明
 
@@ -35,6 +36,26 @@
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\patch-openclaw-windows-esm.ps1
+```
+
+### 一键修复（补丁 + 可选重装 + 重启 Gateway）
+
+默认：只打 ESM 补丁，并尝试 `openclaw gateway restart`（可用 `-NoGatewayRestart` 跳过）。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\repair-openclaw-windows.ps1
+```
+
+若升级/重装后希望先拉干净包再打补丁：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\repair-openclaw-windows.ps1 -Reinstall -Tag latest
+```
+
+若国内镜像拉到的包出现 `dist` 内语法错误（例如乱码、未闭合字符串），可对 `-Reinstall` 指定官方源：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\repair-openclaw-windows.ps1 -Reinstall -Tag 2026.4.5 -Registry https://registry.npmjs.org
 ```
 
 ## 快速开始（Windows PowerShell）
