@@ -12,6 +12,29 @@
 ## 文件说明
 
 - `install-openclaw-cn.ps1`：主安装脚本
+- `patch-openclaw-windows-esm.ps1`：Windows ESM 热补丁脚本（可单独执行）
+
+## Windows ESM 热补丁说明
+
+这个补丁专门用于缓解 OpenClaw 在原生 Windows 下常见的：
+`ERR_UNSUPPORTED_ESM_URL_SCHEME`（`Received protocol 'c:'`）问题。
+
+### 补丁做了什么
+
+- 定位全局安装目录中的 `openclaw/node_modules/jiti/lib/jiti.mjs`
+- 将 `nativeImport` 的 Windows 绝对路径导入逻辑改为 `file://` URL 导入
+- 幂等执行：如果已打过补丁，会自动跳过，不会重复改坏
+
+### 什么时候会被覆盖
+
+- 当你执行 `npm/pnpm` 升级或重装 `openclaw` 后，`node_modules` 可能被重写，补丁可能失效。
+- 本仓库的 `install-openclaw-cn.ps1` 已内置“安装后自动尝试打补丁”的流程。
+
+### 手动重打补丁（一行命令）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\patch-openclaw-windows-esm.ps1
+```
 
 ## 快速开始（Windows PowerShell）
 
